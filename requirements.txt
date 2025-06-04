@@ -1,0 +1,7 @@
+dotenv
+exifread
+imagehash
+numpy
+opencv-python
+pillow_heif
+pygame
