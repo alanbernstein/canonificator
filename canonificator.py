@@ -5,6 +5,7 @@ import sys
 import time
 import sqlite3
 import subprocess
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -24,8 +25,9 @@ from ipdb import iex, set_trace as db
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(sys.path[1] + "/.env")
 DB_FILE = os.getenv("DB_FILE")
+print(DB_FILE)
 
 allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'tif', 'bmp', 'heic']
 
@@ -33,6 +35,14 @@ register_heif_opener()
 
 window_name = 'canonificator'
 
+# canonical = 0: noncanonical
+# canonical = 1: canonical
+# canonical = 2: canonical 10% thumbnail
+# processed = 0: unprocessed
+# processed = 1: processed
+# processed = 2: error
+# processed = 3: deleted
+# processed = 4: rescued (not implemented yet)
 
 def initialize_database():
     """Initialize the database schema."""
@@ -197,17 +207,18 @@ def get_camera_model_pil(image):
 
 def find_duplicates():
     """Identify non-canonical images that are duplicates of canonical images."""
-
+    
     # Find duplicates based on MD5 or perceptual hash
-    nc_search_prefix = '/home/alan/sync/meta-mac/alan-iphone/photos/'
-    MANUAL_CHECK = False
-    DELETE_ALL = True
-
-    nc_search_prefix = '/home/alan/sync-recovery/photorec/recup_dir.417'
+    #nc_search_prefix = '/home/alan/sync/meta-mac/alan-iphone/photos/'
+    #MANUAL_CHECK = False
+    #DELETE_ALL = True   
+    
+    nc_search_prefix = '/home/alan/sync-recovery/photorec/recup_dir.418'
     MANUAL_CHECK = True
     DELETE_ALL = False
 
     conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row  # Enable row access by name
     cursor = conn.cursor()
 
     query = (
@@ -226,93 +237,121 @@ def find_duplicates():
 
     print(f"found {len(prefixed)} non-canonical files with prefix {nc_search_prefix}")
 
+    query_name = "non-canonical duplicates"
     query = (
-    "SELECT nc.id, c.id, nc.filepath, c.filepath, nc.md5sum, c.md5sum, nc.phash, c.phash, nc.width, c.width, nc.height, c.height, nc.filesize, c.filesize "
+    "SELECT "
+    "nc.id AS nc_id, c.id AS c_id, "
+    "nc.filepath AS nc_filepath, c.filepath AS c_filepath, "
+    "nc.md5sum AS nc_md5sum, c.md5sum AS c_md5sum, "
+    "nc.phash AS nc_phash, c.phash AS c_phash, "
+    "nc.width AS nc_width, c.width AS c_width, "
+    "nc.height AS nc_height, c.height AS c_height, "
+    "nc.filesize AS nc_filesize, c.filesize AS c_filesize "
     "FROM images AS nc "
     "JOIN images AS c "
     "ON (nc.md5sum = c.md5sum OR nc.phash = c.phash) "
     "WHERE nc.canonical = 0 AND c.canonical = 1 "
-    f"AND nc.filepath like '{nc_search_prefix}%' "
+    f"AND nc.filepath LIKE '{nc_search_prefix}%' "
     "ORDER BY nc.filepath"
-    )
+    )    
     # AND c.md5sum LIKE 'a%'
 
     t0 = time.time()
     cursor.execute(query)
     t1 = time.time()
-    duplicates = cursor.fetchall()
+    pairs = cursor.fetchall()
     t2 = time.time()
     print(f"select duplicates: {t1-t0:.2f}s execute, {t2-t1:.2f}s fetch")
-
-    if duplicates:
-        #db()
-        print(f"Found {len(duplicates)} non-canonical duplicates:")
-        #pygame.init()
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(window_name, 3000, 1000)
-        for n, duplicate in enumerate(duplicates):
-            nc_id, c_id, nc_filepath, c_filepath, nc_md5, c_md5, nc_phash, c_phash, \
-                nc_width, c_width, nc_height, c_height, nc_filesize, c_filesize = duplicate
-                
-            md5_match = nc_md5 == c_md5
-            phash_match = nc_phash == c_phash
-            dimension_match = (nc_width, nc_height) == (c_width, c_height)
-            filesize_match = nc_filesize == c_filesize
-
-            caption_dict = {
-                'md5_match': md5_match,
-                'phash_match': phash_match,
-                'dimension_match': dimension_match,
-                'filesize_match': filesize_match,
-            }
-
-            print('')
-            print(f"{n}/{len(duplicates)}")
-            print(f"id md5, phash, filepath")
-            print(f"{nc_id:07} {nc_md5} {nc_phash} {nc_width:4}x{nc_height:4} {nc_filepath}")
-            print(f"{ c_id:07} { c_md5} { c_phash} { c_width:4}x{ c_height:4} { c_filepath}")
-
-            if not os.path.exists(nc_filepath):
-                print("File does not exist, skipping...")
-                continue
-
-            valid = None
-            if MANUAL_CHECK:
-                response = display_images_opencv(nc_filepath, c_filepath, caption_dict)
-                focus_window(window_name)
-                if response == 'q':
-                    print("Quitting manual check.")
-                    break
-                elif response == 'd':
-                    print('delete non-canonical duplicate')
-                    valid = True
-                elif response == 's':
-                    print('save non-canonical duplicate')
-                    valid = False
-                
-
-            #print(f"{n:4d}/{len(duplicates):4d} nc.id: {duplicate[0]}, c.id: {duplicate[1]}, nc.filepath: {duplicate[2]}, c.filepath: {duplicate[3]}, {b1}, {b2}, valid={valid}")
-
-            if valid or DELETE_ALL:
-                # processed = 3 -> deleted
-
-                if os.path.exists(nc_filepath):
-                    os.remove(nc_filepath)
-
-                cursor.execute("""
-                    UPDATE images
-                    SET processed = 3
-                    WHERE id = ?
-                 """, (nc_id,))
-
-                
-                print(f"file deleted: {nc_filepath}")
-
-
-    else:
-        print("No non-canonical duplicates found.")
-
+    
+    check_pairs(pairs, query_name, cursor, MANUAL_CHECK, DELETE_ALL)
     conn.close()
+
+def find_rescues():
+    """Identify non-canonical images that are candidates for rescue."""
+    pass
+
+def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
+
+    if not pairs:
+        print("no pairs")
+        return
+
+    #db()
+    print(f"Found {len(pairs)} pairs ({query_name}):")
+    #pygame.init()
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 3000, 1000)
+    for n, pair in enumerate(pairs):
+        row_dict = dict(pair)
+        nc_dict = {k[3:]: v for k, v in row_dict.items() if k.startswith('nc_')}
+        c_dict = {k[2:]: v for k, v in row_dict.items() if k.startswith('c_')}
+        nc = SimpleNamespace(**nc_dict)
+        c = SimpleNamespace(**c_dict)
+
+        md5_match = nc.md5sum == c.md5sum
+        phash_match = nc.phash == c.phash
+        dimension_match = (nc.width, nc.height) == (c.width, c.height)
+        filesize_match = nc.filesize == c.filesize
+
+        caption_dict = {
+            'md5_match': md5_match,
+            'phash_match': phash_match,
+            'dimension_match': dimension_match,
+            'filesize_match': filesize_match,
+        }
+
+        print('')
+        print(f"{n}/{len(pairs)}")
+        print(f"id md5, phash, filepath")
+        print(f"{nc.id:07} {nc.md5sum} {nc.phash} {nc.width:4}x{nc.height:4} {nc.filepath}")
+        print(f"{ c.id:07} { c.md5sum} { c.phash} { c.width:4}x{ c.height:4} { c.filepath}")
+
+        if not os.path.exists(nc.filepath):
+            print("File does not exist, skipping...")
+            continue
+
+        should_delete = False
+        should_rescue = False
+        if MANUAL_CHECK:
+            response = display_images_opencv(nc.filepath, c.filepath, caption_dict)
+            focus_window(window_name)
+            if response == 'q':
+                print("Quitting manual check.")
+                break
+            elif response == 'd':
+                print('delete non-canonical item')
+                should_delete = True
+            elif response == 's':
+                print('skip pair')
+            elif response == 'r':
+                print('rescue non-canonical item')
+                should_rescue = True
+
+        if should_rescue:
+            # use the tba/photos-10 location to figure out what the original tba/photos should be,
+            # then copy the recovered nc file to the canonical location
+            print("Rescue operation not implemented yet.")
+
+            #cursor.execute("""
+            #    UPDATE images
+            #    SET processed = 4
+            #    WHERE id = ?
+            # """, (nc.id,))
+
+        if should_delete or DELETE_ALL:
+            # processed = 3 -> deleted
+
+            if os.path.exists(nc.filepath):
+                os.remove(nc.filepath)
+
+            cursor.execute("""
+                UPDATE images
+                SET processed = 3
+                WHERE id = ?
+                """, (nc.id,))
+
+            print(f"file deleted: {nc.filepath}")
+
 
 def resize_image(image, max_width, max_height):
     """Resize an image while maintaining aspect ratio to fit within max_width and max_height."""
