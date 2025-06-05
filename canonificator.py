@@ -7,15 +7,8 @@ import sqlite3
 import subprocess
 from types import SimpleNamespace
 
-import cv2
-import numpy as np
 from PIL import Image, ExifTags
 from pillow_heif import register_heif_opener
-
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module='pygame.pkgdata')
-
-import pygame
 
 import exifread
 
@@ -39,6 +32,7 @@ allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'tif', 'bmp', 'heic']
 register_heif_opener()
 
 window_name = 'canonificator-review'
+screen_w, screen_h = 1920*2, 1080*2
 
 # canonical = 0: noncanonical
 # canonical = 1: canonical
@@ -273,6 +267,7 @@ def find_duplicates():
 
 def find_rescues():
     """Identify non-canonical images that are candidates for rescue."""
+    # TODO
     pass
 
 def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
@@ -310,6 +305,7 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
         print(f"id md5, phash, filepath")
 
         def jpeg_quality(pth):
+            # TODO
             return 0
 
         nc_quality = jpeg_quality(nc.filepath)
@@ -365,61 +361,6 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
                 """, (nc.id,))
 
             print(f"file deleted: {nc.filepath}")
-
-
-def resize_image(image, max_width, max_height):
-    """Resize an image while maintaining aspect ratio to fit within max_width and max_height."""
-    img_w, img_h = image.get_size()
-    scale = min(max_width / img_w, max_height / img_h)
-    new_size = (int(img_w * scale), int(img_h * scale))
-    return pygame.transform.scale(image, new_size)
-
-def compute_difference_opencv(img1, img2):
-    """Compute absolute difference image, padded to match size."""
-    h = max(img1.shape[0], img2.shape[0])
-    w = max(img1.shape[1], img2.shape[1])
-
-    def pad_to_shape(img, h, w):
-        return cv2.copyMakeBorder(img, 0, h - img.shape[0], 0, w - img.shape[1], cv2.BORDER_CONSTANT, value=0)
-
-    img1_p = pad_to_shape(img1, h, w)
-    img2_p = pad_to_shape(img2, h, w)
-    diff = cv2.absdiff(img1_p, img2_p)
-    return diff
-
-def compute_difference_pygame(image1_path, image2_path):
-    """Compute the absolute difference between two images using Pillow + NumPy."""
-    img1 = Image.open(image1_path).convert("RGB")
-    img2 = Image.open(image2_path).convert("RGB")
-
-    # Convert images to NumPy arrays
-    img1_array = np.array(img1)
-    img2_array = np.array(img2)
-
-    # Ensure both images are the same size
-    if img1_array.shape != img2_array.shape:
-        img2 = img2.resize(img1.size, Image.BILINEAR)
-        img2_array = np.array(img2)
-
-    # Compute absolute difference
-    diff_array = np.abs(img1_array.astype(int) - img2_array.astype(int)).astype(np.uint8)
-
-    # Convert difference array back to a Pygame Surface
-    diff_image = Image.fromarray(diff_array)
-    return pygame.image.fromstring(diff_image.tobytes(), diff_image.size, diff_image.mode)
-
-def load_image(image_path):
-    """Load an image file (supports HEIC) and return a Pygame Surface."""
-    if image_path.lower().endswith(".heic"):
-        image = Image.open(image_path).convert("RGB")  # Convert HEIC to RGB
-    else:
-        image = Image.open(image_path)
-
-    return pygame.image.fromstring(image.tobytes(), image.size, image.mode)
-
-
-screen_w, screen_h = 1920*2, 1080*2
-
 
 def load_image_tk(path, max_width=1000):
     image = Image.open(path).convert("RGB")
@@ -485,130 +426,12 @@ def display_images_tk(path1, path2, caption_dict):
     return key_pressed.get("key")
 
 
-def load_image_as_cv2(path, scale=4):
-    """Load any image using Pillow and convert to OpenCV format with downsampling."""
-    img = Image.open(path)
-    if scale > 1:
-        img = img.resize((img.width // scale, img.height // scale), Image.LANCZOS)
-    img = img.convert('RGB')  # Ensure 3 channels
-    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-
-def compute_difference(img1, img2):
-    """Compute absolute difference image, padded to match size."""
-    h = max(img1.shape[0], img2.shape[0])
-    w = max(img1.shape[1], img2.shape[1])
-
-    def pad_to_shape(img, h, w):
-        return cv2.copyMakeBorder(img, 0, h - img.shape[0], 0, w - img.shape[1], cv2.BORDER_CONSTANT, value=0)
-
-    img1_p = pad_to_shape(img1, h, w)
-    img2_p = pad_to_shape(img2, h, w)
-    diff = cv2.absdiff(img1_p, img2_p)
-    return img1_p, img2_p, diff
-
 def focus_window(window_title):
     time.sleep(0.2)  # give time for the window to appear
     try:
         subprocess.run(['wmctrl', '-a', window_title])
     except FileNotFoundError:
         print("wmctrl not found")
-
-def add_caption_opencv(image, caption_dict):
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 1.0
-    thickness = 2
-    color = (255, 255, 255)  # white text
-    margin = 10
-
-    color_map = {
-        False: (0, 0, 255),  # red for False
-        True: (0, 255, 0),   # green for True
-    }
-    
-    x, y = 10, 30
-    image = image.copy()
-
-    # Draw background rectangle for caption
-    for caption, val in caption_dict.items():
-        color = color_map[val]
-        (text_w, text_h), _ = cv2.getTextSize(caption, font, font_scale, thickness)
-
-        #cv2.rectangle(image, (x - 5, y - 5), (x + text_w + 5, y + text_h + 5), (0, 0, 0), -1)
-        cv2.putText(image, caption, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
-        
-        y += text_h + margin
-    return image
-
-def display_images_opencv(path1, path2, caption="", scale=4):
-    """Load images, compute diff, and display side-by-side in OpenCV with caption."""
-    img1 = load_image_as_cv2(path1, scale)
-    img2 = load_image_as_cv2(path2, scale)
-    img1_p, img2_p, diff = compute_difference(img1, img2)
-
-    # Join images horizontally
-    combined = cv2.hconcat([img1_p, img2_p, diff])
-
-    img_h, img_w = combined.shape[:2]
-    scale_factor = min(screen_w / img_w, screen_h / img_h, 1.0)
-    if scale_factor < 1.0:
-        new_size = (int(img_w * scale_factor), int(img_h * scale_factor))
-        combined = cv2.resize(combined, new_size, interpolation=cv2.INTER_AREA)
-        
-    captioned = add_caption_opencv(combined, caption)
-
-    cv2.imshow(window_name, captioned)
-    key = cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    print(f"Key pressed: {chr(key) if 0 < key < 256 else key}")
-    return chr(key) if 0 < key < 256 else key
-
-def display_images_pygame(image1_path, image2_path, caption):
-    pygame.init()
-
-    # Set screen size
-    screen_width, screen_height = 1200, 600  # Adjust as needed
-    screen = pygame.display.set_mode((screen_width, screen_height))
-    pygame.display.set_caption(caption)
-
-    # Load images
-    img1 = load_image(image1_path)
-    img2 = load_image(image2_path)
-
-    # Compute the difference image
-    diff_img = compute_difference_pygame(image1_path, image2_path)
-
-    # Resize images to fit within a third of the screen width
-    max_width, max_height = screen_width // 3, screen_height
-    img1 = resize_image(img1, max_width, max_height)
-    img2 = resize_image(img2, max_width, max_height)
-    diff_img = resize_image(diff_img, max_width, max_height)
-
-    # Main loop
-    running = True
-    while running:
-        screen.fill((0, 0, 0))  # Black background
-        screen.blit(img1, (0, (screen_height - img1.get_height()) // 2))  # Left
-        screen.blit(img2, (max_width, (screen_height - img2.get_height()) // 2))  # Center
-        screen.blit(diff_img, (max_width * 2, (screen_height - diff_img.get_height()) // 2))  # Right
-
-        pygame.display.flip()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                # print(f"Key pressed: {pygame.key.name(event.key)}")
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                if event.key == ord('1'):
-                    valid = True
-                    running = False
-                if event.key == ord('2'):
-                    valid = False
-                    running = False
-    pygame.quit()
-    return valid
-
 
 def query_count(cursor, query):
     cursor.execute(query)
