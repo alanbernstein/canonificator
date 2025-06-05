@@ -21,6 +21,11 @@ import exifread
 
 import imagehash
 
+import tkinter as tk
+from tkinter import PhotoImage
+from PIL import Image, ImageTk, ImageChops
+import sys
+
 from ipdb import iex, set_trace as db
 
 from dotenv import load_dotenv
@@ -33,7 +38,7 @@ allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'tif', 'bmp', 'heic']
 
 register_heif_opener()
 
-window_name = 'canonificator'
+window_name = 'canonificator-review'
 
 # canonical = 0: noncanonical
 # canonical = 1: canonical
@@ -213,7 +218,7 @@ def find_duplicates():
     #MANUAL_CHECK = False
     #DELETE_ALL = True   
     
-    nc_search_prefix = '/home/alan/sync-recovery/photorec/recup_dir.418'
+    nc_search_prefix = '/home/alan/sync-recovery/photorec/recup_dir.419'
     MANUAL_CHECK = True
     DELETE_ALL = False
 
@@ -279,8 +284,8 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
     #db()
     print(f"Found {len(pairs)} pairs ({query_name}):")
     #pygame.init()
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, 3000, 1000)
+    #cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    #cv2.resizeWindow(window_name, 3000, 1000)
     for n, pair in enumerate(pairs):
         row_dict = dict(pair)
         nc_dict = {k[3:]: v for k, v in row_dict.items() if k.startswith('nc_')}
@@ -313,17 +318,19 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
         should_delete = False
         should_rescue = False
         if MANUAL_CHECK:
-            response = display_images_opencv(nc.filepath, c.filepath, caption_dict)
+            #key = display_images_opencv(nc.filepath, c.filepath, caption_dict)
+            key = display_images_tk(nc.filepath, c.filepath, caption_dict)
+
             focus_window(window_name)
-            if response == 'q':
+            if key == 'q':
                 print("Quitting manual check.")
                 break
-            elif response == 'd':
+            elif key == 'd':
                 print('delete non-canonical item')
                 should_delete = True
-            elif response == 's':
+            elif key == 's':
                 print('skip pair')
-            elif response == 'r':
+            elif key == 'r':
                 print('rescue non-canonical item')
                 should_rescue = True
 
@@ -407,6 +414,70 @@ def load_image(image_path):
 screen_w, screen_h = 1920*2, 1080*2
 
 
+def load_image_tk(path, max_width=1000):
+    image = Image.open(path).convert("RGB")
+    w, h = image.size
+    if w > max_width:
+        ratio = max_width / w
+        image = image.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
+    return image, (w, h)
+
+def display_images_tk(path1, path2, caption_dict):
+    img1, size1 = load_image_tk(path1)
+    img2, size2 = load_image_tk(path2)
+    diff = ImageChops.difference(img1, img2)
+
+    root = tk.Tk()
+    root.title("canonificator-review")
+    root.configure(bg="black")
+
+    # Convert to Tkinter-compatible images
+    img1_tk = ImageTk.PhotoImage(img1)
+    img2_tk = ImageTk.PhotoImage(img2)
+
+    # Layout
+    label1 = tk.Label(root, image=img1_tk, bg="black")
+    label2 = tk.Label(root, image=img2_tk, bg="black")
+    label1.grid(row=0, column=0)
+    label2.grid(row=0, column=1)
+    if img1.size == img2.size:
+        diff_tk = ImageTk.PhotoImage(diff)
+        label_diff = tk.Label(root, image=diff_tk, bg="black")
+        label_diff.grid(row=1, column=1)
+    else:
+        # TODO downsample to compute diff?
+        pass
+
+    caption_label1 = tk.Label(root, text=f"{path1} {size1}", justify="left", anchor="w", bg="black", fg="white", font=("Helvetica", 12))
+    caption_label1.grid(row=0, column=0, sticky="nw")
+    caption_label2 = tk.Label(root, text=f"{path2} {size2}", justify="left", anchor="w", bg="black", fg="white", font=("Helvetica", 12))
+    caption_label2.grid(row=0, column=1, sticky="ne")
+
+    color_map = {
+        False: "red",
+        True: "green",
+    }
+
+    i = 0
+    for caption, val in caption_dict.items():
+        color = color_map[val]
+        label = tk.Label(root, text=caption, fg=color, bg="black", font=("Helvetica", 12))
+        label.grid(row=2 + i, column=0, columnspan=2, sticky="w", padx=10)
+        i += 1
+
+    key_pressed = {}
+
+    def on_key(event):
+        key_pressed["key"] = event.char
+        root.destroy()
+
+    root.bind("<Key>", on_key)
+    root.focus_force()
+    root.mainloop()
+
+    return key_pressed.get("key")
+
+
 def load_image_as_cv2(path, scale=4):
     """Load any image using Pillow and convert to OpenCV format with downsampling."""
     img = Image.open(path)
@@ -435,7 +506,7 @@ def focus_window(window_title):
     except FileNotFoundError:
         print("wmctrl not found")
 
-def add_caption(image, caption_dict):
+def add_caption_opencv(image, caption_dict):
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 1.0
     thickness = 2
@@ -476,7 +547,7 @@ def display_images_opencv(path1, path2, caption="", scale=4):
         new_size = (int(img_w * scale_factor), int(img_h * scale_factor))
         combined = cv2.resize(combined, new_size, interpolation=cv2.INTER_AREA)
         
-    captioned = add_caption(combined, caption)
+    captioned = add_caption_opencv(combined, caption)
 
     cv2.imshow(window_name, captioned)
     key = cv2.waitKey(0)
