@@ -308,8 +308,15 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
         print('')
         print(f"{n}/{len(pairs)}")
         print(f"id md5, phash, filepath")
-        print(f"{nc.id:07} {nc.md5sum} {nc.phash} {nc.width:4}x{nc.height:4} {nc.filepath}")
-        print(f"{ c.id:07} { c.md5sum} { c.phash} { c.width:4}x{ c.height:4} { c.filepath}")
+
+        def jpeg_quality(pth):
+            return 0
+
+        nc_quality = jpeg_quality(nc.filepath)
+        c_quality = jpeg_quality(c.filepath)
+
+        print(f"{nc.id:07} {nc.md5sum} {nc.phash} {nc.width:4}x{nc.height:4} {nc.filepath} {nc_quality}")
+        print(f"{ c.id:07} { c.md5sum} { c.phash} { c.width:4}x{ c.height:4} { c.filepath} { c_quality}")
 
         if not os.path.exists(nc.filepath):
             print("File does not exist, skipping...")
