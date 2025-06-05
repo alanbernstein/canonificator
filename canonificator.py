@@ -7,21 +7,15 @@ import sqlite3
 import subprocess
 from types import SimpleNamespace
 
-from PIL import Image, ExifTags
-from pillow_heif import register_heif_opener
-
+from dotenv import load_dotenv
 import exifread
-
 import imagehash
-
+from pillow_heif import register_heif_opener
+from PIL import ExifTags, Image, ImageTk, ImageChops
 import tkinter as tk
-from tkinter import PhotoImage
-from PIL import Image, ImageTk, ImageChops
-import sys
 
 from ipdb import iex, set_trace as db
 
-from dotenv import load_dotenv
 
 load_dotenv(sys.path[1] + "/.env")
 DB_FILE = os.getenv("DB_FILE")
@@ -32,7 +26,7 @@ allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'tif', 'bmp', 'heic']
 register_heif_opener()
 
 window_name = 'canonificator-review'
-screen_w, screen_h = 1920*2, 1080*2
+screen_w, screen_h = 1920 * 2, 1080 * 2
 
 # canonical = 0: noncanonical
 # canonical = 1: canonical
@@ -42,6 +36,7 @@ screen_w, screen_h = 1920*2, 1080*2
 # processed = 2: error
 # processed = 3: deleted
 # processed = 4: rescued (not implemented yet)
+
 
 def initialize_database():
     """Initialize the database schema."""
@@ -65,6 +60,7 @@ def initialize_database():
     """)
     conn.commit()
     conn.close()
+
 
 def add_image_paths(directories):
     """Add image paths to the database."""
@@ -132,12 +128,15 @@ def process_images(batch_size=100):
                 # Update the database with image properties
                 cursor.execute("""
                     UPDATE images
-                    SET filesize = ?, width = ?, height = ?, md5sum = ?, phash = ?, camera_model = ?, processed = 1
+                    SET filesize = ?, width = ?, height = ?, md5sum = ?,
+                    phash = ?, camera_model = ?, processed = 1
                     WHERE id = ?
-                """, (filesize, width, height, md5sum, phash, camera_model, image_id))
+                """, (filesize, width, height, md5sum,
+                      phash, camera_model, image_id))
 
             except FileNotFoundError as exc:
                 # processed = 3 -> deleted
+                print(exc)
                 cursor.execute("""
                     UPDATE images
                     SET processed = 3
@@ -153,7 +152,6 @@ def process_images(batch_size=100):
                     WHERE id = ?
                 """, (image_id,))
                 print(f"Error processing {file_path}: {exc}")
-                #db()
 
         conn.commit()
         total_rows += len(rows)
@@ -178,8 +176,8 @@ def get_camera_model_exiftool(filepath):
     res = subprocess.check_output(cmd, shell=True)
     str_res = res.decode('utf-8')
 
-    #lines = str_res.split('\n')
-    #for line in lines:
+    # lines = str_res.split('\n')
+    # for line in lines:
 
     parts = str_res.split(':')
     if len(parts) != 2:
@@ -206,12 +204,12 @@ def get_camera_model_pil(image):
 
 def find_duplicates():
     """Identify non-canonical images that are duplicates of canonical images."""
-    
+
     # Find duplicates based on MD5 or perceptual hash
-    #nc_search_prefix = '/home/alan/sync/meta-mac/alan-iphone/photos/'
-    #MANUAL_CHECK = False
-    #DELETE_ALL = True   
-    
+    # nc_search_prefix = '/home/alan/sync/meta-mac/alan-iphone/photos/'
+    # MANUAL_CHECK = False
+    # DELETE_ALL = True
+
     nc_search_prefix = '/home/alan/sync-recovery/photorec/recup_dir.419'
     MANUAL_CHECK = True
     DELETE_ALL = False
@@ -221,10 +219,10 @@ def find_duplicates():
     cursor = conn.cursor()
 
     query = (
-    "SELECT nc.id, nc.filepath  "
-    "FROM images AS nc "
-    f"WHERE nc.filepath like '{nc_search_prefix}%' "
-    "ORDER BY nc.filepath "
+        "SELECT nc.id, nc.filepath  "
+        "FROM images AS nc "
+        f"WHERE nc.filepath like '{nc_search_prefix}%' "
+        "ORDER BY nc.filepath "
     )
 
     t0 = time.time()
@@ -232,27 +230,27 @@ def find_duplicates():
     t1 = time.time()
     prefixed = cursor.fetchall()
     t2 = time.time()
-    print(f"select prefixed: {t1-t0:.2f}s execute, {t2-t1:.2f}s fetch")
+    print(f"select prefixed: {t1 - t0:.2f}s execute, {t2 - t1:.2f}s fetch")
 
     print(f"found {len(prefixed)} non-canonical files with prefix {nc_search_prefix}")
 
     query_name = "non-canonical duplicates"
     query = (
-    "SELECT "
-    "nc.id AS nc_id, c.id AS c_id, "
-    "nc.filepath AS nc_filepath, c.filepath AS c_filepath, "
-    "nc.md5sum AS nc_md5sum, c.md5sum AS c_md5sum, "
-    "nc.phash AS nc_phash, c.phash AS c_phash, "
-    "nc.width AS nc_width, c.width AS c_width, "
-    "nc.height AS nc_height, c.height AS c_height, "
-    "nc.filesize AS nc_filesize, c.filesize AS c_filesize "
-    "FROM images AS nc "
-    "JOIN images AS c "
-    "ON (nc.md5sum = c.md5sum OR nc.phash = c.phash) "
-    "WHERE nc.canonical = 0 AND c.canonical = 1 "
-    f"AND nc.filepath LIKE '{nc_search_prefix}%' "
-    "ORDER BY nc.filepath"
-    )    
+        "SELECT "
+        "nc.id AS nc_id, c.id AS c_id, "
+        "nc.filepath AS nc_filepath, c.filepath AS c_filepath, "
+        "nc.md5sum AS nc_md5sum, c.md5sum AS c_md5sum, "
+        "nc.phash AS nc_phash, c.phash AS c_phash, "
+        "nc.width AS nc_width, c.width AS c_width, "
+        "nc.height AS nc_height, c.height AS c_height, "
+        "nc.filesize AS nc_filesize, c.filesize AS c_filesize "
+        "FROM images AS nc "
+        "JOIN images AS c "
+        "ON (nc.md5sum = c.md5sum OR nc.phash = c.phash) "
+        "WHERE nc.canonical = 0 AND c.canonical = 1 "
+        f"AND nc.filepath LIKE '{nc_search_prefix}%' "
+        "ORDER BY nc.filepath"
+    )
     # AND c.md5sum LIKE 'a%'
 
     t0 = time.time()
@@ -260,8 +258,8 @@ def find_duplicates():
     t1 = time.time()
     pairs = cursor.fetchall()
     t2 = time.time()
-    print(f"select duplicates: {t1-t0:.2f}s execute, {t2-t1:.2f}s fetch")
-    
+    print(f"select duplicates: {t1 - t0:.2f}s execute, {t2 - t1:.2f}s fetch")
+
     check_pairs(pairs, query_name, cursor, MANUAL_CHECK, DELETE_ALL)
     conn.close()
 
@@ -276,11 +274,8 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
         print("no pairs")
         return
 
-    #db()
     print(f"Found {len(pairs)} pairs ({query_name}):")
-    #pygame.init()
-    #cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    #cv2.resizeWindow(window_name, 3000, 1000)
+
     for n, pair in enumerate(pairs):
         row_dict = dict(pair)
         nc_dict = {k[3:]: v for k, v in row_dict.items() if k.startswith('nc_')}
@@ -302,7 +297,7 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
 
         print('')
         print(f"{n}/{len(pairs)}")
-        print(f"id md5, phash, filepath")
+        print("id md5, phash, filepath")
 
         def jpeg_quality(pth):
             # TODO
@@ -321,7 +316,6 @@ def check_pairs(pairs, query_name, cursor, MANUAL_CHECK=True, DELETE_ALL=False):
         should_delete = False
         should_rescue = False
         if MANUAL_CHECK:
-            #key = display_images_opencv(nc.filepath, c.filepath, caption_dict)
             key = display_images_tk(nc.filepath, c.filepath, caption_dict)
 
             focus_window(window_name)
@@ -492,7 +486,7 @@ def report():
     if 0:
         query = """
         EXPLAIN QUERY PLAN
-        SELECT non_canonical.filepath 
+        SELECT non_canonical.filepath
         FROM images AS canonical
         JOIN images AS non_canonical
         ON canonical.md5sum = non_canonical.md5sum
